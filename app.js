@@ -147,6 +147,7 @@ function defaultBoard() {
     homePageId: homePage.id,
     currentPageId: homePage.id,
     currentGridPages: {},
+    navHistory: [],
     pageStack: [],
     pages
   };
@@ -174,6 +175,7 @@ function normalizeBoard(board) {
       homePageId: homePage.id,
       currentPageId: homePage.id,
       currentGridPages: {},
+      navHistory: [],
       pageStack: [],
       pages: [homePage]
     };
@@ -207,6 +209,9 @@ function normalizeBoard(board) {
     homePageId,
     currentPageId,
     currentGridPages: board.currentGridPages && typeof board.currentGridPages === 'object' ? board.currentGridPages : {},
+    navHistory: Array.isArray(board.navHistory)
+      ? board.navHistory.filter(entry => entry && pages.some(page => page.id === entry.pageId)).map(entry => ({ pageId: entry.pageId, gridPage: Math.max(0, Number(entry.gridPage) || 0) }))
+      : [],
     pageStack: Array.isArray(board.pageStack) ? board.pageStack.filter(id => pages.some(page => page.id === id)) : [],
     pages
   };
@@ -314,6 +319,54 @@ function currentPage() {
 
 function getPageName(id) {
   return state.pages.find(page => page.id === id)?.name || 'Folder';
+}
+
+function folderTargetsFromPage(page) {
+  return (page?.buttons || [])
+    .filter(button => (button.action === 'folder' || button.action === 'speakFolder') && button.targetPageId)
+    .map(button => button.targetPageId);
+}
+
+function findPathToPage(targetPageId) {
+  if (!targetPageId || !state.pages.some(page => page.id === targetPageId)) return [state.homePageId].filter(Boolean);
+  if (targetPageId === state.homePageId) return [state.homePageId];
+
+  const queue = [[state.homePageId]];
+  const seen = new Set([state.homePageId]);
+
+  while (queue.length) {
+    const path = queue.shift();
+    const page = state.pages.find(item => item.id === path[path.length - 1]);
+    for (const childId of folderTargetsFromPage(page)) {
+      if (seen.has(childId)) continue;
+      const nextPath = [...path, childId];
+      if (childId === targetPageId) return nextPath;
+      seen.add(childId);
+      queue.push(nextPath);
+    }
+  }
+
+  return [targetPageId];
+}
+
+function syncPageStackToCurrent() {
+  const path = findPathToPage(state.currentPageId);
+  state.pageStack = path.length > 1 ? path.slice(0, -1) : [];
+}
+
+function pushNavigationState() {
+  if (!Array.isArray(state.navHistory)) state.navHistory = [];
+  state.navHistory.push({
+    pageId: state.currentPageId,
+    gridPage: getGridPageIndex(state.currentPageId)
+  });
+  if (state.navHistory.length > 100) state.navHistory.shift();
+}
+
+function canGoBack() {
+  if (Array.isArray(state.navHistory) && state.navHistory.length) return true;
+  if (getGridPageIndex(state.currentPageId) > 0) return true;
+  return Array.isArray(state.pageStack) && state.pageStack.length > 0;
 }
 
 function isValidPasscode(value, allowBlank = false) {
@@ -432,7 +485,7 @@ function updatePageNav() {
   currentPageName.textContent = page.name || 'Home';
   boardPath.textContent = pagePath().map(id => getPageName(id)).join(' › ');
   const atHome = state.currentPageId === state.homePageId;
-  backPage.disabled = !state.pageStack.length;
+  backPage.disabled = !canGoBack();
   homePage.disabled = atHome;
   renamePage.hidden = !editMode;
   deletePage.hidden = !editMode || atHome;
@@ -542,6 +595,8 @@ function renderGridPager() {
     pageButton.setAttribute('aria-label', `Show grid page ${i + 1} of ${count}`);
     pageButton.setAttribute('aria-current', i === current ? 'page' : 'false');
     pageButton.addEventListener('click', () => {
+      if (i === current) return;
+      pushNavigationState();
       setGridPageIndex(i, page.id);
       render();
     });
@@ -696,16 +751,38 @@ function activateButton(index) {
 
 function openFolder(pageId) {
   if (!state.pages.some(page => page.id === pageId)) return;
-  if (state.currentPageId !== pageId) state.pageStack.push(state.currentPageId);
+  if (state.currentPageId === pageId) return;
+  pushNavigationState();
   state.currentPageId = pageId;
+  syncPageStackToCurrent();
   syncControlsToState();
   render();
 }
 
 function goBackPage() {
+  if (Array.isArray(state.navHistory) && state.navHistory.length) {
+    const previous = state.navHistory.pop();
+    if (previous?.pageId && state.pages.some(page => page.id === previous.pageId)) {
+      state.currentPageId = previous.pageId;
+      setGridPageIndex(previous.gridPage || 0, previous.pageId);
+      syncPageStackToCurrent();
+      syncControlsToState();
+      render();
+      return;
+    }
+  }
+
+  const currentGridPage = getGridPageIndex(state.currentPageId);
+  if (currentGridPage > 0) {
+    setGridPageIndex(currentGridPage - 1, state.currentPageId);
+    render();
+    return;
+  }
+
   const previous = state.pageStack.pop();
   if (!previous) return;
   state.currentPageId = previous;
+  syncPageStackToCurrent();
   syncControlsToState();
   render();
 }
@@ -713,6 +790,7 @@ function goBackPage() {
 function goHomePage() {
   state.currentPageId = state.homePageId;
   state.pageStack = [];
+  state.navHistory = [];
   syncControlsToState();
   render();
 }
@@ -945,6 +1023,7 @@ function deleteCurrentPage() {
   });
   state.currentPageId = state.homePageId;
   state.pageStack = [];
+  state.navHistory = [];
   render();
 }
 

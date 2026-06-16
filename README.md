@@ -103,3 +103,10 @@ New installs and **Reset sample board** now create this default structure:
 - Occupational Therapy: 3 columns x 3 rows
 
 Home includes Rest, Snack, Hug, Toys, My words, and Occupational Therapy. Snack/Toys/Occupational Therapy use Speak + Open Folder where requested; My words opens its folder without speaking first. Each page stores its own row/column layout.
+
+
+## 2026-06-16 default board + Back navigation fix
+
+- The bundled sample board is the requested Home/Snack/Toys/My words/Occupational Therapy structure.
+- Folder buttons use S, F, and SF behavior as specified.
+- Back now returns to the previously visited numbered grid page inside a multi-page folder before backing out of that folder.
